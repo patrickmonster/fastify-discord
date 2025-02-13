@@ -1,4 +1,4 @@
-import { FastifyReply, FastifyRequest } from 'fastify';
+import { FastifyPluginCallback, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import rawBody from 'fastify-raw-body';
 import { InteractionResponseType, verifyKey } from './interaction';
@@ -266,7 +266,9 @@ export class Reply {
  *
  * @see https://github.com/fastify/fastify-sensible
  */
-const plugin = fp<{
+const plugin: FastifyPluginCallback<{
+    DISCORD_PUBLIC_KEY: string;
+}> = fp<{
     DISCORD_PUBLIC_KEY: string;
 }>(
     (fastify, opts) => {
