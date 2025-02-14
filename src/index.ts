@@ -1,4 +1,4 @@
-import { FastifyPluginCallback, FastifyReply, FastifyRequest } from 'fastify';
+import { FastifyPluginCallback, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import rawBody from 'fastify-raw-body';
 import { InteractionResponseType, verifyKey } from './interaction';
@@ -48,13 +48,6 @@ export type RESTPostAPIChannelMessage = RESTPostAPIChannelMessageJSONBody & ephe
 export type RESTPostAPIChannelMessageParams = RESTPostAPIChannelMessage | string;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// fastify  정의
-declare module 'fastify' {
-    interface FastifyInstance {
-        verifyDiscordKey: (request: FastifyRequest, reply: FastifyReply, done: Function) => void;
-        interaction: (req: FastifyRequest<{ Body: APIInteraction }>, res: FastifyReply) => Reply;
-    }
-}
 
 interface CustomInstance extends AxiosInstance {
     get<T>(url: string, config?: AxiosRequestConfig): Promise<T>;
@@ -190,7 +183,7 @@ export class Reply {
      * @param message
      * @returns
      */
-    public async auth(message: APICommandAutocompleteInteractionResponseCallbackData) {
+    public async auto(message: APICommandAutocompleteInteractionResponseCallbackData) {
         return await this.res.status(200).send({
             type: InteractionResponseType.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT,
             data: message,
@@ -251,7 +244,7 @@ export class Reply {
     *[Symbol.iterator]() {
         yield ['get', this.get.bind(this)];
         yield ['remove', this.remove.bind(this)];
-        yield ['auth', this.auth.bind(this)];
+        yield ['auto', this.auto.bind(this)];
         yield ['differ', this.differ.bind(this)];
         yield ['differEdit', this.differEdit.bind(this)];
         yield ['edit', this.edit.bind(this)];
@@ -261,16 +254,23 @@ export class Reply {
     }
 }
 
+declare module 'fastify' {
+    interface FastifyInstance {
+        verifyDiscordKey: (request: FastifyRequest, reply: FastifyReply, done: Function) => void;
+    }
+}
+
+interface FastifyDiscordPluginOptions extends FastifyPluginOptions {
+    DISCORD_PUBLIC_KEY: string;
+    decorateKey?: string;
+    decorateReply?: string;
+}
 /**
  * This plugins adds some utilities to handle http errors
  *
  * @see https://github.com/fastify/fastify-sensible
  */
-const plugin: FastifyPluginCallback<{
-    DISCORD_PUBLIC_KEY: string;
-}> = fp<{
-    DISCORD_PUBLIC_KEY: string;
-}>(
+const plugin: FastifyPluginCallback<FastifyDiscordPluginOptions> = fp<FastifyDiscordPluginOptions>(
     (fastify, opts) => {
         fastify.register(rawBody, {
             field: 'rawBody',
@@ -279,29 +279,33 @@ const plugin: FastifyPluginCallback<{
         });
 
         // 인증 처리 시도 - 사용자 인증 정보가 있는 경우에 시도함.
-        fastify.decorate('verifyDiscordKey', (request: FastifyRequest, reply: FastifyReply, done: Function) => {
-            const { method, body, headers, rawBody } = request;
-            if (method === 'POST') {
-                const isValidRequest = verifyKey(
-                    rawBody || JSON.stringify(body),
-                    `${headers['x-signature-ed25519'] || headers['X-Signature-Ed25519']}`,
-                    `${headers['x-signature-timestamp'] || headers['X-Signature-Timestamp']}`,
-                    `${opts.DISCORD_PUBLIC_KEY}`
-                );
-                if (isValidRequest) return done();
-            }
-            return reply.code(401).send('Bad request signature');
-        });
-
         fastify.decorate(
-            'interaction',
-            (
-                req: FastifyRequest<{
-                    Body: APIInteraction;
-                }>,
-                res: FastifyReply
-            ): Reply => new Reply(req, res)
+            opts.decorateKey || 'verifyDiscordKey',
+            (request: FastifyRequest, reply: FastifyReply, done: Function) => {
+                const { method, body, headers, rawBody } = request;
+                if (method === 'POST') {
+                    const isValidRequest = verifyKey(
+                        rawBody || JSON.stringify(body),
+                        `${headers['x-signature-ed25519'] || headers['X-Signature-Ed25519']}`,
+                        `${headers['x-signature-timestamp'] || headers['X-Signature-Timestamp']}`,
+                        `${opts.DISCORD_PUBLIC_KEY}`
+                    );
+                    if (isValidRequest) return done();
+                }
+                return reply.code(401).send('Bad request signature');
+            }
         );
+
+        if (opts.decorateReply)
+            fastify.decorate(
+                opts.decorateReply,
+                (
+                    req: FastifyRequest<{
+                        Body: APIInteraction;
+                    }>,
+                    res: FastifyReply
+                ): Reply => new Reply(req, res)
+            );
     },
     {
         name: 'fastify-discord',
