@@ -271,7 +271,7 @@ interface FastifyDiscordPluginOptions extends FastifyPluginOptions {
  * @see https://github.com/fastify/fastify-sensible
  */
 const plugin: FastifyPluginCallback<FastifyDiscordPluginOptions> = fp<FastifyDiscordPluginOptions>(
-    (fastify, opts) => {
+    async (fastify, opts) => {
         fastify.register(rawBody, {
             field: 'rawBody',
             encoding: 'utf8',

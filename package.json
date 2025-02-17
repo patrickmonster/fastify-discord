@@ -1,6 +1,6 @@
 {
     "name": "fastify-discord",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "description": "fastify plugin for discord command",
     "main": "dist/cjs/index.js",
     "module": "dist/mjs/index.js",
