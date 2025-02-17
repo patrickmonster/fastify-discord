@@ -310,7 +310,6 @@ const plugin: FastifyPluginCallback<FastifyDiscordPluginOptions> = fp<FastifyDis
     {
         name: 'fastify-discord',
         fastify: '^4.x',
-        dependencies: ['fastify-raw-body'],
     }
 );
 
