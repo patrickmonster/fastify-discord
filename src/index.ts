@@ -9,11 +9,20 @@ import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import {
     APIApplicationCommandAutocompleteInteraction,
     APIApplicationCommandInteraction,
+    APIApplicationCommandInteractionData,
+    APIApplicationCommandInteractionWrapper,
+    APIBaseInteraction,
+    APIChatInputApplicationCommandInteractionData,
     APICommandAutocompleteInteractionResponseCallbackData,
+    APIContextMenuInteractionData,
     APIInteraction,
     APIMessage,
+    APIMessageButtonInteractionData,
     APIMessageComponentInteraction,
+    APIMessageComponentInteractionData,
+    APIMessageSelectMenuInteractionData,
     APIModalInteractionResponseCallbackData,
+    APIModalSubmission,
     APIModalSubmitInteraction,
     APIWebhook,
     InteractionType,
@@ -46,6 +55,44 @@ type ephemeral = { ephemeral?: boolean };
 
 export type RESTPostAPIChannelMessage = RESTPostAPIChannelMessageJSONBody & ephemeral;
 export type RESTPostAPIChannelMessageParams = RESTPostAPIChannelMessage | string;
+
+declare module 'fastify' {
+    interface FastifyInstance {
+        verifyDiscordKey: (request: FastifyRequest, reply: FastifyReply, done: Function) => void;
+    }
+}
+
+type BaseInteraction<
+    APIInteractionType extends
+        | APIApplicationCommandInteractionWrapper<APIApplicationCommandInteractionData>
+        | APIBaseInteraction<
+              | InteractionType.MessageComponent
+              | InteractionType.ApplicationCommand
+              | InteractionType.ApplicationCommandAutocomplete
+              | InteractionType.ModalSubmit,
+              any
+          >
+> = Omit<APIInteractionType, 'data' | 'type'> & Reply;
+
+// 메세지 명령어 인터렉션
+export type MessageInteraction = BaseInteraction<APIMessageComponentInteraction> & APIMessageComponentInteractionData;
+// 명령어 인터렉션
+export type AppInteraction = BaseInteraction<APIApplicationCommandInteraction> & APIApplicationCommandInteractionData;
+// 명령어 자동완성 인터렉션
+export type AppAutocompleteInteraction = BaseInteraction<APIApplicationCommandInteraction> &
+    APIApplicationCommandAutocompleteInteraction;
+// 명령어 모달 인터렉션
+export type ModelInteraction = BaseInteraction<APIApplicationCommandInteraction> & APIModalSubmission;
+
+export type AppChatInputInteraction = BaseInteraction<APIApplicationCommandInteraction> &
+    APIChatInputApplicationCommandInteractionData;
+export type AppContextMenuInteraction = BaseInteraction<APIApplicationCommandInteraction> &
+    APIContextMenuInteractionData;
+
+export type MessageButtonInteraction = BaseInteraction<APIMessageComponentInteraction> &
+    APIMessageButtonInteractionData;
+export type MessageMenuInteraction = BaseInteraction<APIMessageComponentInteraction> &
+    APIMessageSelectMenuInteractionData;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -88,43 +135,66 @@ discordInteraction.interceptors.response.use(
  * 응답 객체를 만듭니다
  */
 export class Reply {
+    [key: string]: any; /* 데이터 객체를 맵핑함 */
+
     private req: FastifyRequest<{ Body: APIInteraction }>;
     private res: FastifyReply;
     private isReply: boolean;
 
-    private token: string;
-    private application_id: string;
-    private type: InteractionType;
-    private id: string;
+    private interaction_type: InteractionType;
+    private interaction_message_id: string;
+
+    public _application_id: string;
+    public token: string;
+    public message?: APIMessage;
+    public type: InteractionType;
 
     constructor(
         req: FastifyRequest<{
             Body: APIInteraction;
         }>,
         res: FastifyReply,
-        id?: string
+        interaction_message_id?: string
     ) {
         const {
-            body: { token, application_id, message, type },
+            body: { token, application_id, message, type, data },
         } = req;
 
-        this.id = id ?? '@original';
+        /* 인터렉션 컨트롤에 필요한것 */
+        this.interaction_message_id = interaction_message_id ?? '@original';
         this.isReply = false;
         this.token = token;
-        this.application_id = application_id;
-        this.type = type;
+        this._application_id = application_id;
+        this.interaction_type = type;
 
         this.res = res;
         this.req = req;
+
+        this.token = token;
+        this.message = message;
+        this.type = type;
+
+        if (data) {
+            // 데이터가 있을 경우 맵핑
+            for (const [key, value] of Object.entries(data)) {
+                this[key] = value;
+            }
+        }
+    }
+
+    public get application_id() {
+        return this._application_id;
     }
 
     public async get() {
         return await discordInteraction.get<APIMessage>(
-            `/webhooks/${this.application_id}/${this.token}/messages/${this.id}`
+            `/webhooks/${this._application_id}/${this.token}/messages/${this.interaction_message_id}`
         );
     }
     public async remove() {
-        await discordInteraction.delete(`/webhooks/${this.application_id}/${this.token}/messages/${this.id}`);
+        await discordInteraction.delete(
+            `/webhooks/${this._application_id}/${this.token}/messages/${this.interaction_message_id}`
+        );
     }
 
     /**
@@ -148,11 +218,14 @@ export class Reply {
         // 응답
         if (this.isReply) {
             await discordInteraction
-                .patch(`/webhooks/${this.application_id}/${this.token}/messages/${this.id}`, message)
+                .patch(
+                    `/webhooks/${this._application_id}/${this.token}/messages/${this.interaction_message_id}`,
+                    message
+                )
                 .catch(e => {
                     console.log(
                         '메세지 수정 실패',
-                        `/webhooks/${this.application_id}/${this.token}/messages/${this.id}`,
+                        `/webhooks/${this._application_id}/${this.token}/messages/${this.interaction_message_id}`,
                         e.response.data
                     );
                 });
@@ -196,7 +269,7 @@ export class Reply {
      */
     public async model(message: APIModalInteractionResponseCallbackData) {
         // 모달 응답
-        if (this.type !== InteractionType.ModalSubmit)
+        if (this.interaction_type !== InteractionType.ModalSubmit)
             return await this.res.status(200).send({
                 type: InteractionResponseType.MODAL,
                 data: message,
@@ -210,7 +283,7 @@ export class Reply {
      */
     public async edit(message: RESTPostAPIChannelMessage) {
         // 선처리 메세지 수정 ( 인터렉션 전의 이벤트)
-        if (this.type === InteractionType.MessageComponent)
+        if (this.interaction_type === InteractionType.MessageComponent)
             return await this.res.status(200).send({
                 type: InteractionResponseType.UPDATE_MESSAGE,
                 data: message,
@@ -222,7 +295,7 @@ export class Reply {
      * @param message
      */
     public async differEdit(message: RESTPostAPIChannelMessage) {
-        if (this.type === InteractionType.MessageComponent)
+        if (this.interaction_type === InteractionType.MessageComponent)
             return await this.res.status(200).send({
                 type: InteractionResponseType.DEFERRED_UPDATE_MESSAGE,
                 data: message,
@@ -237,7 +310,7 @@ export class Reply {
      */
     public async follow(message: RESTPostAPIChannelMessage): Promise<Reply> {
         return await discordInteraction
-            .post<APIWebhook>(`/webhooks/${this.application_id}/${this.token}`, this.appendEmpheral(message))
+            .post<APIWebhook>(`/webhooks/${this._application_id}/${this.token}`, this.appendEmpheral(message))
             .then(({ id }) => new Reply(this.req, this.res, id));
     }
 
@@ -251,12 +324,6 @@ export class Reply {
         yield ['follow', this.follow.bind(this)];
         yield ['model', this.model.bind(this)];
         yield ['reply', this.reply.bind(this)];
-    }
-}
-
-declare module 'fastify' {
-    interface FastifyInstance {
-        verifyDiscordKey: (request: FastifyRequest, reply: FastifyReply, done: Function) => void;
     }
 }
 
@@ -281,7 +348,7 @@ const plugin: FastifyPluginCallback<FastifyDiscordPluginOptions> = fp<FastifyDis
         // 인증 처리 시도 - 사용자 인증 정보가 있는 경우에 시도함.
         fastify.decorate(
             opts.decorateKey || 'verifyDiscordKey',
-            (request: FastifyRequest, reply: FastifyReply, done: Function) => {
+            (request: FastifyRequest<{ Body: APIInteraction }>, reply: FastifyReply, done: Function) => {
                 const { method, body, headers, rawBody } = request;
                 if (method === 'POST') {
                     const isValidRequest = verifyKey(
@@ -290,6 +357,11 @@ const plugin: FastifyPluginCallback<FastifyDiscordPluginOptions> = fp<FastifyDis
                         `${headers['x-signature-timestamp'] || headers['X-Signature-Timestamp']}`,
                         `${opts.DISCORD_PUBLIC_KEY}`
                     );
+
+                    if (body.type === InteractionType.Ping)
+                        /* 응답을 처리합니다 */
+                        return reply.status(200).send({ type: InteractionResponseType.PONG });
+
                     if (isValidRequest) return done();
                 }
                 return reply.code(401).send('Bad request signature');

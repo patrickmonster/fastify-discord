@@ -155,3 +155,21 @@ interaction.auto({
     ]
 });
 ```
+
+# UPDATE
+1.0.4
+ - init
+
+1.1.0
+ - interaction 객체 내부에 데이터 첨가
+ - 인증시 핑처리를 해줍니다.
+ - 각 인터렉션별로 별도로 정의하였습니다.
+  - MessageInteraction
+  - AppInteraction
+  - AppAutocompleteInteraction
+  - ModelInteraction
+
+  - AppChatInputInteraction
+  - AppContextMenuInteraction
+  - MessageButtonInteraction
+  - MessageMenuInteraction
