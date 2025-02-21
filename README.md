@@ -164,12 +164,15 @@ interaction.auto({
  - interaction 객체 내부에 데이터 첨가
  - 인증시 핑처리를 해줍니다.
  - 각 인터렉션별로 별도로 정의하였습니다.
-  - MessageInteraction
-  - AppInteraction
-  - AppAutocompleteInteraction
-  - ModelInteraction
+MessageInteraction
+AppInteraction
+AppAutocompleteInteraction
+ModelInteraction
 
-  - AppChatInputInteraction
-  - AppContextMenuInteraction
-  - MessageButtonInteraction
-  - MessageMenuInteraction
+AppChatInputInteraction
+AppContextMenuInteraction
+MessageButtonInteraction
+MessageMenuInteraction
+
+1.1.1
+ - interaction 생성객체 (타입 치환용)

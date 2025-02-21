@@ -26,6 +26,7 @@ import {
     APIModalSubmitInteraction,
     APIWebhook,
     InteractionType,
+    Snowflake,
 } from 'discord-api-types/v10';
 
 import { RESTPostAPIChannelMessageJSONBody } from 'discord-api-types/rest/v10';
@@ -63,35 +64,49 @@ declare module 'fastify' {
 }
 
 type BaseInteraction<
+    Type extends
+        | InteractionType.MessageComponent
+        | InteractionType.ApplicationCommand
+        | InteractionType.ApplicationCommandAutocomplete
+        | InteractionType.ModalSubmit,
     APIInteractionType extends
         | APIApplicationCommandInteractionWrapper<APIApplicationCommandInteractionData>
-        | APIBaseInteraction<
-              | InteractionType.MessageComponent
-              | InteractionType.ApplicationCommand
-              | InteractionType.ApplicationCommandAutocomplete
-              | InteractionType.ModalSubmit,
-              any
-          >
-> = Omit<APIInteractionType, 'data' | 'type'> & Reply;
+        | APIBaseInteraction<Type, any>
+> = Omit<APIInteractionType, 'data' | 'type'> & Reply<Type>;
 
 // 메세지 명령어 인터렉션
-export type MessageInteraction = BaseInteraction<APIMessageComponentInteraction> & APIMessageComponentInteractionData;
+export type MessageInteraction = BaseInteraction<InteractionType.MessageComponent, APIMessageComponentInteraction> &
+    APIMessageComponentInteractionData;
 // 명령어 인터렉션
-export type AppInteraction = BaseInteraction<APIApplicationCommandInteraction> & APIApplicationCommandInteractionData;
+export type AppInteraction = BaseInteraction<InteractionType.ApplicationCommand, APIApplicationCommandInteraction> &
+    APIApplicationCommandInteractionData;
 // 명령어 자동완성 인터렉션
-export type AppAutocompleteInteraction = BaseInteraction<APIApplicationCommandInteraction> &
+export type AppAutocompleteInteraction = BaseInteraction<
+    InteractionType.ApplicationCommandAutocomplete,
+    APIApplicationCommandInteraction
+> &
     APIApplicationCommandAutocompleteInteraction;
 // 명령어 모달 인터렉션
-export type ModelInteraction = BaseInteraction<APIApplicationCommandInteraction> & APIModalSubmission;
+export type ModelInteraction = BaseInteraction<InteractionType.ModalSubmit, APIApplicationCommandInteraction> &
+    APIModalSubmission;
 
-export type AppChatInputInteraction = BaseInteraction<APIApplicationCommandInteraction> &
+export type AppChatInputInteraction = BaseInteraction<
+    InteractionType.ApplicationCommand,
+    APIApplicationCommandInteraction
+> &
     APIChatInputApplicationCommandInteractionData;
-export type AppContextMenuInteraction = BaseInteraction<APIApplicationCommandInteraction> &
+export type AppContextMenuInteraction = BaseInteraction<
+    InteractionType.ApplicationCommand,
+    APIApplicationCommandInteraction
+> &
     APIContextMenuInteractionData;
 
-export type MessageButtonInteraction = BaseInteraction<APIMessageComponentInteraction> &
+export type MessageButtonInteraction = BaseInteraction<
+    InteractionType.MessageComponent,
+    APIMessageComponentInteraction
+> &
     APIMessageButtonInteractionData;
-export type MessageMenuInteraction = BaseInteraction<APIMessageComponentInteraction> &
+export type MessageMenuInteraction = BaseInteraction<InteractionType.MessageComponent, APIMessageComponentInteraction> &
     APIMessageSelectMenuInteractionData;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -134,30 +149,30 @@ discordInteraction.interceptors.response.use(
 /**
  * 응답 객체를 만듭니다
  */
-export class Reply {
+export class Reply<Type extends InteractionType> {
     [key: string]: any; /* 데이터 객체를 맵핑함 */
 
     private req: FastifyRequest<{ Body: APIInteraction }>;
     private res: FastifyReply;
     private isReply: boolean;
 
-    private interaction_type: InteractionType;
     private interaction_message_id: string;
 
-    public _application_id: string;
     public token: string;
     public message?: APIMessage;
-    public type: InteractionType;
+    public interaction_type: Type;
+    public id: Snowflake;
+    public _application_id: Snowflake;
 
-    constructor(
+    private constructor(
         req: FastifyRequest<{
             Body: APIInteraction;
         }>,
         res: FastifyReply,
-        interaction_message_id?: string
+        interaction_message_id?: string /* follow 인경우 사용합니다. */
     ) {
         const {
-            body: { token, application_id, message, type, data },
+            body: { token, application_id, message, type, data, id },
         } = req;
 
         /* 인터렉션 컨트롤에 필요한것 */
@@ -165,20 +180,44 @@ export class Reply {
         this.isReply = false;
         this.token = token;
         this._application_id = application_id;
-        this.interaction_type = type;
 
         this.res = res;
         this.req = req;
 
         this.token = token;
         this.message = message;
-        this.type = type;
+        this.interaction_type = type as Type;
+        this.id = id;
 
         if (data) {
             // 데이터가 있을 경우 맵핑
             for (const [key, value] of Object.entries(data)) {
                 this[key] = value;
             }
+        }
+    }
+
+    /**
+     * 인터렉션 타입에 따라 인스턴스를 생성합니다.
+     * @param req
+     * @param res
+     * @returns
+     */
+    public static createInstance(req: FastifyRequest<{ Body: APIInteraction }>, res: FastifyReply) {
+        switch (req.body.type) {
+            case InteractionType.MessageComponent:
+                return new Reply<InteractionType.MessageComponent>(req, res) as MessageInteraction;
+            case InteractionType.ApplicationCommand:
+                return new Reply<InteractionType.ApplicationCommand>(req, res) as AppInteraction;
+            case InteractionType.ApplicationCommandAutocomplete:
+                return new Reply<InteractionType.ApplicationCommandAutocomplete>(
+                    req,
+                    res
+                ) as AppAutocompleteInteraction;
+            case InteractionType.ModalSubmit:
+                return new Reply<InteractionType.ModalSubmit>(req, res) as ModelInteraction;
+            case InteractionType.Ping:
+                return null;
         }
     }
 
@@ -308,7 +347,7 @@ export class Reply {
      * @param message
      * @returns
      */
-    public async follow(message: RESTPostAPIChannelMessage): Promise<Reply> {
+    public async follow(message: RESTPostAPIChannelMessage) {
         return await discordInteraction
             .post<APIWebhook>(`/webhooks/${this._application_id}/${this.token}`, this.appendEmpheral(message))
             .then(({ id }) => new Reply(this.req, this.res, id));
@@ -376,7 +415,7 @@ const plugin: FastifyPluginCallback<FastifyDiscordPluginOptions> = fp<FastifyDis
                         Body: APIInteraction;
                     }>,
                     res: FastifyReply
-                ): Reply => new Reply(req, res)
+                ) => Reply.createInstance(req, res)
             );
     },
     {
